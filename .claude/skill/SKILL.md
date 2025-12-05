@@ -5,12 +5,11 @@ CLI tool that exports Linear issues to Excel planning spreadsheets.
 ## Structure
 
 ```
-linear_to_excel.py      # Entry point
+linear_to_excel.py      # CLI entry point
 src/
 ├── __init__.py
 ├── linear_api.py       # Linear GraphQL API client
-├── excel_generator.py  # Excel generation logic
-└── main.py             # CLI commands
+└── excel_generator.py  # Excel generation logic
 ```
 
 ## Modules
@@ -26,13 +25,14 @@ src/
 ### src/excel_generator.py
 - `generate_week_dates(start_date, num_weeks)` - Generate week dates
 - `extract_unique_assignees(issues)` - Get unique assignees from issues
-- `create_excel(team_name, quarter, issues, output_file, start_date, num_weeks)` - Generate Excel
+- `create_excel(...)` - Generate Excel with capacity section, SUMIF formulas, styling
 
-### src/main.py
-- CLI entry point using Click
+### linear_to_excel.py
+- CLI using Click
 - Options: --team, --quarter, --output, --start-date, --weeks, --initiatives, --list-teams, --list-initiatives
 
 ## Colors
 
 - Yellow `#FFF2CC`: Headers
 - Green `#B7E1CD`: Estimates
+- Gray `#D9D9D9`: Initiative separators

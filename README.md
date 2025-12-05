@@ -13,12 +13,11 @@ A Python CLI that exports Linear issues to quarterly planning Excel spreadsheets
 ## Project Structure
 
 ```
-├── linear_to_excel.py      # Entry point
+├── linear_to_excel.py      # CLI entry point
 ├── src/
 │   ├── __init__.py
 │   ├── linear_api.py       # Linear GraphQL API client
-│   ├── excel_generator.py  # Excel generation logic
-│   └── main.py             # CLI commands
+│   └── excel_generator.py  # Excel generation logic
 ├── requirements.txt
 └── .env                    # API key (gitignored)
 ```
