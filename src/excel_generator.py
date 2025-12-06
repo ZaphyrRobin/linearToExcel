@@ -81,21 +81,20 @@ def get_week_index(cycle_start: str, start_date: datetime, num_weeks: int) -> in
         return -1
 
 
-def _populate_sheet(
+def populate_sheet(
     ws,
     team_name: str,
     quarter: str,
     issues: list,
     start_date: datetime,
     num_weeks: int = 13,
-    cycle_id: str = None,
     cycle_start: str = None,
 ):
     """Populate a worksheet with planning data.
 
-    If cycle_id is provided, only issues in that cycle will have estimates
-    placed in the weekly columns. All issues are still shown.
-    cycle_start is used to determine which week column to place the estimates.
+    If cycle_start is provided, only issues from cycles up to and including
+    that date will have estimates placed in the weekly columns.
+    All issues are still shown.
     """
 
     # Styles
@@ -210,10 +209,7 @@ def _populate_sheet(
             ws.cell(row=current_row, column=3, value=project_name)
             ws.cell(row=current_row, column=4, value=issue.get("title", ""))
 
-            # Only show estimate if no cycle filter, or if issue belongs to this cycle
             issue_cycle = issue.get("cycle") or {}
-            issue_in_cycle = (cycle_id is None) or (issue_cycle.get("id") == cycle_id)
-
             estimate = issue.get("estimate")
             if estimate is not None:
                 cell = ws.cell(row=current_row, column=5, value=float(estimate))
@@ -228,15 +224,23 @@ def _populate_sheet(
             assignee_name = format_name(assignee.get("name", ""))
             ws.cell(row=current_row, column=8, value=assignee_name)
 
-            # Only fill weekly capacity for issues in the current cycle
-            if issue_in_cycle and estimate is not None and assignee_name:
-                # Use the passed cycle_start (from tab's cycle), not the issue's cycle
-                # This ensures all estimates for this tab's cycle go to the correct week
-                effective_cycle_start = cycle_start if cycle_start else issue_cycle.get("startsAt", "")
-                week_idx = get_week_index(effective_cycle_start, start_date, num_weeks)
-                if week_idx >= 0:
-                    cell = ws.cell(row=current_row, column=9 + week_idx, value=float(estimate))
-                    cell.fill = GREEN_FILL
+            # Fill weekly capacity based on issue's cycle
+            # If cycle_id is set (by-cycles mode), only show issues up to and including this cycle
+            # Otherwise show all issues
+            issue_cycle_start = issue_cycle.get("startsAt", "")
+            if estimate is not None and assignee_name and issue_cycle_start:
+                # Check if this issue's cycle should be shown on this tab
+                # (either no cycle filter, or issue's cycle is <= current tab's cycle)
+                should_show = True
+                if cycle_start:
+                    # Only show if issue's cycle starts on or before this tab's cycle
+                    should_show = issue_cycle_start <= cycle_start
+
+                if should_show:
+                    week_idx = get_week_index(issue_cycle_start, start_date, num_weeks)
+                    if week_idx >= 0:
+                        cell = ws.cell(row=current_row, column=9 + week_idx, value=float(estimate))
+                        cell.fill = GREEN_FILL
 
             current_row += 1
 
@@ -272,7 +276,7 @@ def create_excel(
     ws = wb.active
     ws.title = start_date.strftime("%m-%d")
 
-    _populate_sheet(ws, team_name, quarter, issues, start_date, num_weeks)
+    populate_sheet(ws, team_name, quarter, issues, start_date, num_weeks)
 
     wb.save(output_file)
     click.echo(f"Excel file saved to: {output_file}")
@@ -295,7 +299,7 @@ def overwrite_excel(
     wb.remove(old_sheet)
     ws = wb.create_sheet(title=old_title, index=0)
 
-    _populate_sheet(ws, team_name, quarter, issues, start_date, num_weeks)
+    populate_sheet(ws, team_name, quarter, issues, start_date, num_weeks)
 
     wb.save(input_file)
     click.echo(f"Excel file overwritten: {input_file}")
@@ -325,7 +329,7 @@ def append_to_excel(
 
     ws = wb.create_sheet(title=tab_name)
 
-    _populate_sheet(ws, team_name, quarter, issues, start_date, num_weeks)
+    populate_sheet(ws, team_name, quarter, issues, start_date, num_weeks)
 
     wb.save(input_file)
     click.echo(f"New tab '{tab_name}' added to: {input_file}")
@@ -367,7 +371,6 @@ def create_excel_by_cycles(
     wb.remove(wb.active)
 
     for cycle in cycles:
-        cycle_id = cycle["id"]
         cycle_start = cycle.get("startsAt", "")
 
         # Parse cycle start date for tab name
@@ -381,7 +384,7 @@ def create_excel_by_cycles(
         tab_name = tab_name[:31].replace("/", "-").replace("\\", "-")
 
         ws = wb.create_sheet(title=tab_name)
-        _populate_sheet(ws, team_name, quarter, issues, effective_start, num_weeks, cycle_id=cycle_id, cycle_start=cycle_start)
+        populate_sheet(ws, team_name, quarter, issues, effective_start, num_weeks, cycle_start=cycle_start)
         click.echo(f"Created tab: {tab_name}")
 
     wb.save(output_file)
