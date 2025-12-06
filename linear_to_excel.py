@@ -7,7 +7,7 @@ from datetime import datetime, timedelta
 import click
 
 from src.linear_api import fetch_teams, fetch_all_initiatives, fetch_issues_for_team, get_team_by_key
-from src.excel_generator import create_excel
+from src.excel_generator import create_excel, append_to_excel, overwrite_excel, create_excel_by_cycles
 
 
 @click.command()
@@ -19,7 +19,10 @@ from src.excel_generator import create_excel
 @click.option("--initiatives", "-i", default=None, help="Comma-separated initiative slugs")
 @click.option("--list-teams", is_flag=True, help="List available teams")
 @click.option("--list-initiatives", is_flag=True, help="List available initiatives")
-def main(team, quarter, output, start_date, weeks, initiatives, list_teams, list_initiatives):
+@click.option("--input", "-f", "input_file", default=None, help="Existing xlsx file to overwrite with latest data")
+@click.option("--append", "-a", default=None, help="Existing xlsx file to append a new tab to")
+@click.option("--by-cycles", is_flag=True, help="Create separate tabs for each Linear cycle")
+def main(team, quarter, output, start_date, weeks, initiatives, list_teams, list_initiatives, input_file, append, by_cycles):
     """Generate a quarterly planning Excel spreadsheet from Linear."""
     if list_teams:
         teams = fetch_teams()
@@ -70,9 +73,6 @@ def main(team, quarter, output, start_date, weeks, initiatives, list_teams, list
         start = datetime(now.year, quarter_start_month, 1)
         start -= timedelta(days=start.weekday())  # Adjust to Monday
 
-    if not output:
-        output = f"{team_name} - {quarter} Planning.xlsx"
-
     click.echo("Fetching issues from Linear...")
     issues = fetch_issues_for_team(team_id, initiative_slugs)
     click.echo(f"Found {len(issues)} issues")
@@ -80,8 +80,28 @@ def main(team, quarter, output, start_date, weeks, initiatives, list_teams, list
     if not issues:
         click.echo("Warning: No issues found.", err=True)
 
-    click.echo("Generating Excel file...")
-    create_excel(team_name, quarter, issues, output, start, weeks)
+    # Determine which mode to use
+    if input_file:
+        # Overwrite existing file with latest data
+        click.echo(f"Overwriting existing file: {input_file}")
+        overwrite_excel(team_name, quarter, issues, input_file, start, weeks)
+    elif append:
+        # Append new tab to existing file
+        click.echo(f"Appending new tab to: {append}")
+        append_to_excel(team_name, quarter, issues, append, start, weeks)
+    elif by_cycles:
+        # Create file with separate tabs per cycle
+        if not output:
+            output = f"{team_name} - {quarter} Planning.xlsx"
+        click.echo("Generating Excel file with cycle tabs...")
+        create_excel_by_cycles(team_name, quarter, issues, output, start, weeks)
+    else:
+        # Create new file
+        if not output:
+            output = f"{team_name} - {quarter} Planning.xlsx"
+        click.echo("Generating Excel file...")
+        create_excel(team_name, quarter, issues, output, start, weeks)
+
     click.echo("Done!")
 
 

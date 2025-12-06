@@ -101,6 +101,18 @@ def fetch_issues_for_team(team_id: str, initiative_slugs: Optional[list] = None)
                 url
                 estimate
                 assignee { name }
+                state {
+                    name
+                    type
+                }
+                completedAt
+                cycle {
+                    id
+                    name
+                    number
+                    startsAt
+                    endsAt
+                }
                 project {
                     id
                     name
@@ -117,6 +129,13 @@ def fetch_issues_for_team(team_id: str, initiative_slugs: Optional[list] = None)
         data = linear_request(query, variables)
         issues_data = data.get("issues", {})
         issues = issues_data.get("nodes", [])
+
+        # Filter out cancelled/archived issues (keep: triage, backlog, unstarted, started, completed)
+        excluded_types = {"canceled", "cancelled"}
+        issues = [
+            issue for issue in issues
+            if (issue.get("state") or {}).get("type", "").lower() not in excluded_types
+        ]
 
         # Filter by initiative if specified
         if initiative_ids:
