@@ -124,7 +124,8 @@ def fetch_issues_for_team(team_id: str, initiative_slugs: Optional[list] = None)
     }
     """
 
-    while True:
+    has_next_page = True
+    while has_next_page:
         variables = {"teamId": team_id, "after": end_cursor}
         data = linear_request(query, variables)
         issues_data = data.get("issues", {})
@@ -150,8 +151,7 @@ def fetch_issues_for_team(team_id: str, initiative_slugs: Optional[list] = None)
         all_issues.extend(issues)
 
         page_info = issues_data.get("pageInfo", {})
-        if not page_info.get("hasNextPage"):
-            break
+        has_next_page = page_info.get("hasNextPage", False)
         end_cursor = page_info.get("endCursor")
 
     return all_issues
@@ -300,7 +300,8 @@ def fetch_issue_history(issue_id: str) -> list:
     }
     """
 
-    while True:
+    has_next_page = True
+    while has_next_page:
         variables = {"issueId": issue_id, "after": end_cursor}
         data = linear_request(query, variables)
         issue_data = data.get("issue", {})
@@ -311,16 +312,38 @@ def fetch_issue_history(issue_id: str) -> list:
         all_history.extend(history)
 
         page_info = history_data.get("pageInfo", {})
-        if not page_info.get("hasNextPage"):
-            break
+        has_next_page = page_info.get("hasNextPage", False)
         end_cursor = page_info.get("endCursor")
 
     return all_history
 
 
-def fetch_issues_history_bulk(issue_ids: list) -> dict:
-    """Fetch history for multiple issues and return a dict mapping issue_id -> history list."""
+def fetch_issues_history_bulk(issue_ids: list, max_workers: int = 10) -> dict:
+    """Fetch history for multiple issues in parallel.
+
+    Args:
+        issue_ids: List of issue IDs to fetch history for
+        max_workers: Maximum number of parallel requests (default: 10)
+
+    Returns:
+        Dict mapping issue_id -> list of history entries
+    """
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
     result = {}
-    for issue_id in issue_ids:
-        result[issue_id] = fetch_issue_history(issue_id)
+
+    if not issue_ids:
+        return result
+
+    def fetch_single(issue_id: str) -> tuple:
+        """Fetch history for a single issue and return (issue_id, history)."""
+        return issue_id, fetch_issue_history(issue_id)
+
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = {executor.submit(fetch_single, issue_id): issue_id for issue_id in issue_ids}
+
+        for future in as_completed(futures):
+            issue_id, history = future.result()
+            result[issue_id] = history
+
     return result
