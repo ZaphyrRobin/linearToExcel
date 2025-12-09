@@ -163,3 +163,164 @@ def get_team_by_key(team_key: str) -> Optional[dict]:
         if team.get("key", "").upper() == team_key.upper():
             return team
     return None
+
+
+def fetch_issue_by_identifier(identifier: str) -> Optional[dict]:
+    """Fetch a single issue by its identifier (e.g., 'APP1-123')."""
+    query = """
+    query($term: String!) {
+        searchIssues(term: $term, first: 1) {
+            nodes {
+                id
+                identifier
+                title
+                url
+                state { name }
+                assignee { name }
+            }
+        }
+    }
+    """
+    data = linear_request(query, {"term": identifier.upper()})
+    issues = data.get("searchIssues", {}).get("nodes", [])
+
+    # Verify we got the exact match
+    for issue in issues:
+        if issue.get("identifier", "").upper() == identifier.upper():
+            return issue
+
+    return None
+
+
+def fetch_issue_history(issue_id: str) -> list:
+    """Fetch the history of changes for an issue."""
+    all_history = []
+    end_cursor = None
+
+    query = """
+    query($issueId: String!, $after: String) {
+        issue(id: $issueId) {
+            history(first: 100, after: $after) {
+                nodes {
+                    id
+                    createdAt
+                    updatedDescription
+                    fromTitle
+                    toTitle
+                    fromPriority
+                    toPriority
+                    fromEstimate
+                    toEstimate
+                    fromDueDate
+                    toDueDate
+                    trashed
+                    autoArchived
+                    autoClosed
+                    addedLabelIds
+                    removedLabelIds
+                    actor {
+                        id
+                        name
+                    }
+                    botActor {
+                        id
+                        name
+                    }
+                    fromState {
+                        id
+                        name
+                        type
+                    }
+                    toState {
+                        id
+                        name
+                        type
+                    }
+                    fromAssignee {
+                        id
+                        name
+                    }
+                    toAssignee {
+                        id
+                        name
+                    }
+                    fromCycle {
+                        id
+                        name
+                        number
+                    }
+                    toCycle {
+                        id
+                        name
+                        number
+                    }
+                    fromProject {
+                        id
+                        name
+                    }
+                    toProject {
+                        id
+                        name
+                    }
+                    fromParent {
+                        id
+                        identifier
+                        title
+                    }
+                    toParent {
+                        id
+                        identifier
+                        title
+                    }
+                    fromTeam {
+                        id
+                        key
+                        name
+                    }
+                    toTeam {
+                        id
+                        key
+                        name
+                    }
+                    addedLabels {
+                        id
+                        name
+                    }
+                    removedLabels {
+                        id
+                        name
+                    }
+                }
+                pageInfo {
+                    hasNextPage
+                    endCursor
+                }
+            }
+        }
+    }
+    """
+
+    while True:
+        variables = {"issueId": issue_id, "after": end_cursor}
+        data = linear_request(query, variables)
+        issue_data = data.get("issue", {})
+        if not issue_data:
+            break
+        history_data = issue_data.get("history", {})
+        history = history_data.get("nodes", [])
+        all_history.extend(history)
+
+        page_info = history_data.get("pageInfo", {})
+        if not page_info.get("hasNextPage"):
+            break
+        end_cursor = page_info.get("endCursor")
+
+    return all_history
+
+
+def fetch_issues_history_bulk(issue_ids: list) -> dict:
+    """Fetch history for multiple issues and return a dict mapping issue_id -> history list."""
+    result = {}
+    for issue_id in issue_ids:
+        result[issue_id] = fetch_issue_history(issue_id)
+    return result

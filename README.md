@@ -59,6 +59,11 @@ python linear_to_excel.py -t APP1 -i "37e115a3f23c,75024d4f765d" --append ~/Down
 # Generate with separate tabs per Linear cycle
 python linear_to_excel.py -t APP1 -i "37e115a3f23c,75024d4f765d" --by-cycles -o ~/Downloads/APP1_Q4_2025_planning.xlsx
 
+# Generate with separate tabs per week (accumulated capacity)
+python linear_to_excel.py -t APP1 -i "75024d4f765d" --by-weeks -o ~/Downloads/APP1_Q4_2025_planning.xlsx
+
+python linear_to_excel.py --issue-history APP1-923
+
 # List teams
 python linear_to_excel.py --list-teams
 ```
@@ -76,6 +81,7 @@ python linear_to_excel.py --list-teams
 | `-f, --input` | Existing xlsx file to overwrite with latest data |
 | `-a, --append` | Existing xlsx file to append a new tab to |
 | `--by-cycles` | Create separate tabs for each Linear cycle |
+| `--by-weeks` | Create separate tabs for each week with accumulated capacity |
 | `--list-teams` | List available teams |
 | `--list-initiatives` | List available initiatives |
 
