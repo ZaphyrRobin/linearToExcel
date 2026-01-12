@@ -9,9 +9,8 @@ A Python CLI that exports Linear issues to quarterly planning Excel spreadsheets
 - Auto-generate capacity section with assignees from issues
 - Color-coded cells (yellow headers, green estimates, gray initiative separators)
 - SUMIF formulas for per-assignee capacity calculation
-- Overwrite existing Excel files with latest data
-- Append new tabs to existing Excel files (named by cycle start date)
-- Generate multiple tabs by Linear cycle (each tab shows all issues, capacity filled per cycle)
+- Refresh existing Excel files with latest Linear data (preserves manual edits when Linear data is missing)
+- "Linear vs Estimated" column to indicate data source for each issue
 
 ## Project Structure
 
@@ -41,31 +40,14 @@ A Python CLI that exports Linear issues to quarterly planning Excel spreadsheets
 ## Usage
 
 ```bash
-# Generate new planning spreadsheet
-python linear_to_excel.py -t APP1 -q "Q4 2025"
-
-# List initiatives hash numbers
+# 1. List initiatives to get their IDs
 python linear_to_excel.py --list-initiatives
 
-# Filter by initiatives' hash numbers
-python linear_to_excel.py -t APP1 -i "37e115a3f23c,75024d4f765d" -o ~/Downloads/APP1_Q4_2025_planning.xlsx
+# 2. Generate new planning spreadsheet
+python linear_to_excel.py -t APP1 -i "37e115a3f23c,75024d4f765d" -s 2025-10-06 -e 2026-01-30 -o ~/Downloads/APP1_Q4_2025_planning.xlsx
 
-# Overwrite existing file with latest Linear data
-python linear_to_excel.py -t APP1 -i "37e115a3f23c,75024d4f765d" --input ~/Downloads/APP1_Q4_2025_planning.xlsx
-
-# Append new tab to existing file (tab named by cycle start date)
-python linear_to_excel.py -t APP1 -i "37e115a3f23c,75024d4f765d" --append ~/Downloads/APP1_Q4_2025_planning.xlsx
-
-# Generate with separate tabs per Linear cycle
-python linear_to_excel.py -t APP1 -i "37e115a3f23c,75024d4f765d" --by-cycles -o ~/Downloads/APP1_Q4_2025_planning.xlsx
-
-# Generate with separate tabs per week (accumulated capacity)
-python linear_to_excel.py -t APP1 -i "75024d4f765d" --by-weeks -o ~/Downloads/APP1_Q4_2025_planning.xlsx
-
-python linear_to_excel.py --issue-history APP1-923
-
-# List teams
-python linear_to_excel.py --list-teams
+# 3. Refresh existing file with latest Linear data (preserves manual edits)
+python linear_to_excel.py -t APP1 -i "37e115a3f23c,75024d4f765d" -s 2025-10-06 -e 2026-01-30 -f ~/Downloads/APP1_Q4_2025_planning.xlsx
 ```
 
 ## Options
@@ -73,15 +55,12 @@ python linear_to_excel.py --list-teams
 | Option | Description |
 |--------|-------------|
 | `-t, --team` | Linear team key (required) |
-| `-q, --quarter` | Quarter label (default: current) |
 | `-o, --output` | Output filename |
 | `-s, --start-date` | Start date (YYYY-MM-DD) |
-| `-w, --weeks` | Number of weeks (default: 13) |
+| `-e, --end-date` | End date (YYYY-MM-DD) - calculates number of weeks |
 | `-i, --initiatives` | Comma-separated initiative slugs |
-| `-f, --input` | Existing xlsx file to overwrite with latest data |
-| `-a, --append` | Existing xlsx file to append a new tab to |
-| `--by-cycles` | Create separate tabs for each Linear cycle |
-| `--by-weeks` | Create separate tabs for each week with accumulated capacity |
+| `-f, --file` | Existing xlsx file to refresh with latest data |
+| `--issue-history` | Show history of a specific issue (e.g., 'APP1-123') |
 | `--list-teams` | List available teams |
 | `--list-initiatives` | List available initiatives |
 
@@ -89,6 +68,7 @@ python linear_to_excel.py --list-teams
 
 | Column | Content |
 |--------|---------|
+| A | Linear vs Estimated (data source indicator) |
 | B | Initiative |
 | C | Project |
 | D | Issue title |

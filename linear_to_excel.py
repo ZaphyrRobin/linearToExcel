@@ -6,8 +6,8 @@ from datetime import datetime, timedelta
 
 import click
 
-from src.linear_api import fetch_teams, fetch_all_initiatives, fetch_issues_for_team, get_team_by_key, fetch_issue_by_identifier, fetch_issue_history, fetch_issues_history_bulk
-from src.excel_generator import create_excel, append_to_excel, overwrite_excel, create_excel_by_cycles, create_excel_by_weeks
+from src.linear_api import fetch_teams, fetch_all_initiatives, fetch_issues_for_team, get_team_by_key, fetch_issue_by_identifier, fetch_issue_history
+from src.excel_generator import create_excel, refresh_excel
 
 
 PRIORITY_LABELS = {0: "No priority", 1: "Urgent", 2: "High", 3: "Medium", 4: "Low"}
@@ -180,19 +180,15 @@ def display_issue_history(identifier: str) -> None:
 
 @click.command()
 @click.option("--team", "-t", default=None, help="Linear team key (e.g., 'APP1')")
-@click.option("--quarter", "-q", default=None, help="Quarter label (e.g., 'Q4 2025')")
 @click.option("--output", "-o", default=None, help="Output Excel filename")
 @click.option("--start-date", "-s", default=None, help="Start date (YYYY-MM-DD)")
-@click.option("--weeks", "-w", default=13, help="Number of weeks (default: 13)")
+@click.option("--end-date", "-e", default=None, help="End date (YYYY-MM-DD) - used with --file to set week range")
 @click.option("--initiatives", "-i", default=None, help="Comma-separated initiative slugs")
 @click.option("--list-teams", is_flag=True, help="List available teams")
 @click.option("--list-initiatives", is_flag=True, help="List available initiatives")
-@click.option("--input", "-f", "input_file", default=None, help="Existing xlsx file to overwrite with latest data")
-@click.option("--append", "-a", default=None, help="Existing xlsx file to append a new tab to")
-@click.option("--by-cycles", is_flag=True, help="Create separate tabs for each Linear cycle")
-@click.option("--by-weeks", is_flag=True, help="Create separate tabs for each week with accumulated capacity")
+@click.option("--file", "-f", "existing_file", default=None, help="Existing xlsx file to refresh with latest Linear data")
 @click.option("--issue-history", "issue_id", default=None, help="Show history of a specific issue (e.g., 'APP1-123')")
-def main(team, quarter, output, start_date, weeks, initiatives, list_teams, list_initiatives, input_file, append, by_cycles, by_weeks, issue_id):
+def main(team, output, start_date, end_date, initiatives, list_teams, list_initiatives, existing_file, issue_id):
     """Generate a quarterly planning Excel spreadsheet from Linear."""
     if issue_id:
         display_issue_history(issue_id)
@@ -235,10 +231,9 @@ def main(team, quarter, output, start_date, weeks, initiatives, list_teams, list
     if initiative_slugs:
         click.echo(f"Filtering by initiatives: {initiative_slugs}")
 
-    # Determine quarter and start date
+    # Determine quarter label and start date
     now = datetime.now()
-    if not quarter:
-        quarter = f"Q{(now.month - 1) // 3 + 1} {now.year}"
+    quarter = f"Q{(now.month - 1) // 3 + 1} {now.year}"
 
     if start_date:
         start = datetime.strptime(start_date, "%Y-%m-%d")
@@ -254,40 +249,29 @@ def main(team, quarter, output, start_date, weeks, initiatives, list_teams, list
     if not issues:
         click.echo("Warning: No issues found.", err=True)
 
+    # Calculate num_weeks from end_date if provided (default: 13 weeks)
+    num_weeks = 13
+    if end_date:
+        try:
+            end = datetime.strptime(end_date, "%Y-%m-%d")
+            days_diff = (end - start).days
+            num_weeks = (days_diff // 7) + 1  # +1 to include the end week
+            click.echo(f"Date range: {start.strftime('%Y-%m-%d')} to {end.strftime('%Y-%m-%d')} ({num_weeks} weeks)")
+        except ValueError:
+            click.echo("Error: Invalid end-date format. Use YYYY-MM-DD", err=True)
+            sys.exit(1)
+
     # Determine which mode to use
-    if input_file:
-        # Overwrite existing file with latest data
-        click.echo(f"Overwriting existing file: {input_file}")
-        overwrite_excel(team_name, quarter, issues, input_file, start, weeks)
-    elif append:
-        # Append new tab to existing file
-        click.echo(f"Appending new tab to: {append}")
-        append_to_excel(team_name, quarter, issues, append, start, weeks)
-    elif by_cycles:
-        # Create file with separate tabs per cycle
-        if not output:
-            output = f"{team_name} - {quarter} Planning.xlsx"
-        click.echo("Generating Excel file with cycle tabs...")
-        create_excel_by_cycles(team_name, quarter, issues, output, start, weeks)
-    elif by_weeks:
-        # Create file with separate tabs per week
-        if not output:
-            output = f"{team_name} - {quarter} Planning.xlsx"
-
-        # Fetch history for all issues to determine historical assignees
-        click.echo("Fetching issue history for historical assignees...")
-        issue_ids = [issue.get("id") for issue in issues if issue.get("id")]
-        issues_history = fetch_issues_history_bulk(issue_ids)
-        click.echo(f"Fetched history for {len(issues_history)} issues")
-
-        click.echo("Generating Excel file with weekly tabs...")
-        create_excel_by_weeks(team_name, quarter, issues, output, start, weeks, issues_history=issues_history)
+    if existing_file:
+        # Refresh existing file with latest Linear data
+        click.echo(f"Refreshing existing file: {existing_file}")
+        refresh_excel(team_name, quarter, issues, existing_file, start, num_weeks)
     else:
         # Create new file
         if not output:
             output = f"{team_name} - {quarter} Planning.xlsx"
         click.echo("Generating Excel file...")
-        create_excel(team_name, quarter, issues, output, start, weeks)
+        create_excel(team_name, quarter, issues, output, start, num_weeks)
 
     click.echo("Done!")
 
