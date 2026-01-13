@@ -358,8 +358,23 @@ def populate_sheet_refresh(
 
     week_dates = generate_week_dates(start_date, num_weeks)
 
-    # Row 1: Capacity header and week dates
-    capacity_header_row = 1
+    # Track which columns have Linear data vs manual estimates (will be filled during data processing)
+    # Key: week_idx, Value: set of sources ("Linear" or "Estimated")
+    column_sources = {i: set() for i in range(num_weeks)}
+
+    # Row layout:
+    # Row 1: Data Source row (Linear/Estimation per column)
+    # Row 2: Capacity header with week dates
+    # Rows 3+: Engineer capacity SUMIF rows
+    # Blank separator row
+    # Header row with column labels
+    # Data rows
+
+    source_indicator_row = 1
+    capacity_header_row = 2
+    capacity_start_row = 3
+
+    # Write Capacity header row
     ws.cell(row=capacity_header_row, column=8, value="Capacity")
     ws.cell(row=capacity_header_row, column=8).font = header_font
     ws.cell(row=capacity_header_row, column=8).fill = YELLOW_FILL
@@ -376,11 +391,11 @@ def populate_sheet_refresh(
     cell.font = header_font
     cell.fill = YELLOW_FILL
 
-    # Rows 2+: Engineer capacity rows (SUMIF formulas)
-    capacity_start_row = 2
-
-    # Calculate header row position (immediately after capacity section)
-    header_row = capacity_start_row + len(assignees) + 1  # +1 for one blank row separator
+    # Calculate remaining row positions
+    # - capacity_start_row + len(assignees) - 1: last capacity row
+    # - +1: blank separator row
+    # - +1: header row with column labels
+    header_row = capacity_start_row + len(assignees) + 1
 
     # Data rows start right after header
     data_start_row = header_row + 1
@@ -493,24 +508,31 @@ def populate_sheet_refresh(
             # Determine fill color: green if assigned, yellow if unassigned
             estimate_fill = GREEN_FILL if assignee_name else YELLOW_FILL
 
-            if linear_has_assignee and linear_has_cycle:
-                # Linear has both assignee and cycle: use Linear data for estimate placement
-                if estimate is not None:
-                    linear_week_idx = get_week_index(issue_cycle_start, start_date, num_weeks)
-                    if linear_week_idx < 0:
-                        linear_week_idx = 0
-                    elif linear_week_idx >= num_weeks:
-                        linear_week_idx = num_weeks - 1
+            # Track which week index came from Linear (if any)
+            linear_week_idx = None
+            if linear_has_assignee and linear_has_cycle and estimate is not None:
+                # Linear has both assignee and cycle: calculate the week position
+                linear_week_idx = get_week_index(issue_cycle_start, start_date, num_weeks)
+                if linear_week_idx < 0:
+                    linear_week_idx = 0
+                elif linear_week_idx >= num_weeks:
+                    linear_week_idx = num_weeks - 1
 
-                    cell = ws.cell(row=current_row, column=9 + linear_week_idx, value=float(estimate))
+                cell = ws.cell(row=current_row, column=9 + linear_week_idx, value=float(estimate))
+                cell.fill = estimate_fill
+                column_sources[linear_week_idx].add("Linear")
+
+            # Also preserve existing Excel estimate placements for weeks NOT covered by Linear
+            for week_idx in range(num_weeks):
+                # Skip the week where Linear already placed an estimate
+                if week_idx == linear_week_idx:
+                    continue
+
+                existing_val = existing_capacity.get((issue_url, week_idx))
+                if existing_val is not None:
+                    cell = ws.cell(row=current_row, column=9 + week_idx, value=existing_val)
                     cell.fill = estimate_fill
-            else:
-                # No assignee or no cycle in Linear: preserve existing Excel estimate placement
-                for week_idx in range(num_weeks):
-                    existing_val = existing_capacity.get((issue_url, week_idx))
-                    if existing_val is not None:
-                        cell = ws.cell(row=current_row, column=9 + week_idx, value=existing_val)
-                        cell.fill = estimate_fill
+                    column_sources[week_idx].add("Estimated")
 
             current_row += 1
 
@@ -523,6 +545,24 @@ def populate_sheet_refresh(
             col_letter = get_column_letter(col)
             formula = f'=SUMIF($H${data_start_row}:$H${actual_last_row},$H{row},{col_letter}${data_start_row}:{col_letter}${actual_last_row})'
             ws.cell(row=row, column=col, value=formula)
+
+    # Add a row showing "Linear" or "Estimation" for each weekly column (just above the main header)
+    ws.cell(row=source_indicator_row, column=8, value="Data Source")
+    ws.cell(row=source_indicator_row, column=8).font = header_font
+
+    for week_idx in range(num_weeks):
+        sources = column_sources.get(week_idx, set())
+        if "Linear" in sources and "Estimated" in sources:
+            source_label = "Linear, Estimation"
+        elif "Linear" in sources:
+            source_label = "Linear"
+        elif "Estimated" in sources:
+            source_label = "Estimation"
+        else:
+            source_label = ""
+
+        cell = ws.cell(row=source_indicator_row, column=9 + week_idx, value=source_label)
+        cell.font = header_font
 
     # Column widths (A=Linear vs Estimated, G=Linear Ticket fixed width, H=Assigned to)
     widths = {"A": 18, "B": 30, "C": 35, "D": 50, "E": 15, "F": 50, "G": 40, "H": 15}
@@ -550,32 +590,62 @@ def read_existing_capacity_data(wb, start_date: datetime) -> tuple:
     max_week_idx = 0
 
     # Find header row by looking for "Linear Ticket" in column G
+    # Also check column F for older file formats without "Linear vs Estimated" column
     header_row = None
+    linear_ticket_col = None
     for row in range(1, min(50, ws.max_row + 1)):
-        cell_val = ws.cell(row=row, column=7).value
-        if cell_val and "Linear Ticket" in str(cell_val):
+        # Check column G first (new format with "Linear vs Estimated" in column A)
+        cell_val_g = ws.cell(row=row, column=7).value
+        if cell_val_g and "Linear Ticket" in str(cell_val_g):
             header_row = row
+            linear_ticket_col = 7
+            break
+        # Check column F (old format without "Linear vs Estimated" column)
+        cell_val_f = ws.cell(row=row, column=6).value
+        if cell_val_f and "Linear Ticket" in str(cell_val_f):
+            header_row = row
+            linear_ticket_col = 6
             break
 
     if not header_row:
         return {}, {}, 0
 
+    # Determine column offsets based on file format
+    # New format: Linear Ticket in col G (7), Assigned to in col H (8), weeks start at col I (9)
+    # Old format: Linear Ticket in col F (6), Assigned to in col G (7), weeks start at col H (8)
+    assignee_col = linear_ticket_col + 1
+    week_start_col = linear_ticket_col + 2
+
+    # Find the capacity header row by looking for "Capacity" label
+    # This row has all the week dates and is more reliable for parsing
+    capacity_header_row = None
+    for row in range(1, header_row):
+        # Check for "Capacity" in column H (8) or nearby columns
+        for check_col in range(6, 10):
+            cell_val = ws.cell(row=row, column=check_col).value
+            if cell_val and str(cell_val).strip() == "Capacity":
+                capacity_header_row = row
+                break
+        if capacity_header_row:
+            break
+
+    # Use capacity header row for date parsing if found, otherwise use data header row
+    date_header_row = capacity_header_row if capacity_header_row else header_row
+
     # Find week columns by parsing dates in the header row
-    # Week columns start at column 9 (I)
-    # Check many more columns to capture all weeks from existing file
     week_col_map = {}  # week_index -> column
-    for col in range(9, ws.max_column + 1):
-        cell_val = ws.cell(row=header_row, column=col).value
+    for col in range(week_start_col, ws.max_column + 1):
+        cell_val = ws.cell(row=date_header_row, column=col).value
         if cell_val:
             if isinstance(cell_val, datetime):
                 week_date = cell_val
             elif isinstance(cell_val, str):
                 # Try to parse M/D format
                 try:
-                    # Assume current year, but handle year boundary
+                    # First try with start_date year
                     week_date = datetime.strptime(f"{cell_val}/{start_date.year}", "%m/%d/%Y")
-                    # If the date is way in the past, it might be next year
-                    if week_date < start_date - timedelta(days=180):
+                    # If the parsed date is before start_date, it's likely next year
+                    if week_date < start_date:
                         week_date = datetime.strptime(f"{cell_val}/{start_date.year + 1}", "%m/%d/%Y")
                 except ValueError:
                     continue
@@ -592,12 +662,12 @@ def read_existing_capacity_data(wb, start_date: datetime) -> tuple:
 
     # Read data rows (start after header row)
     for row in range(header_row + 1, ws.max_row + 1):
-        url = ws.cell(row=row, column=7).value  # Linear Ticket URL in column G
+        url = ws.cell(row=row, column=linear_ticket_col).value  # Linear Ticket URL
         if not url:
             continue
 
-        # Read assignee (column H)
-        assignee_val = ws.cell(row=row, column=8).value
+        # Read assignee
+        assignee_val = ws.cell(row=row, column=assignee_col).value
         if assignee_val:
             assignee_data[url] = str(assignee_val)
 
