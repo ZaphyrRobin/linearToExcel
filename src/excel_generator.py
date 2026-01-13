@@ -505,11 +505,10 @@ def populate_sheet_refresh(
             # Fill weekly capacity
             issue_cycle_start = issue_cycle.get("startsAt", "")
 
-            # Determine fill color: green if assigned, yellow if unassigned
-            estimate_fill = GREEN_FILL if assignee_name else YELLOW_FILL
-
             # Track which week index came from Linear (if any)
             linear_week_idx = None
+            has_linear_placement = False
+
             if linear_has_assignee and linear_has_cycle and estimate is not None:
                 # Linear has both assignee and cycle: calculate the week position
                 linear_week_idx = get_week_index(issue_cycle_start, start_date, num_weeks)
@@ -518,21 +517,23 @@ def populate_sheet_refresh(
                 elif linear_week_idx >= num_weeks:
                     linear_week_idx = num_weeks - 1
 
+                # Linear data gets green fill
                 cell = ws.cell(row=current_row, column=9 + linear_week_idx, value=float(estimate))
-                cell.fill = estimate_fill
+                cell.fill = GREEN_FILL
                 column_sources[linear_week_idx].add("Linear")
+                has_linear_placement = True
 
-            # Also preserve existing Excel estimate placements for weeks NOT covered by Linear
-            for week_idx in range(num_weeks):
-                # Skip the week where Linear already placed an estimate
-                if week_idx == linear_week_idx:
-                    continue
-
-                existing_val = existing_capacity.get((issue_url, week_idx))
-                if existing_val is not None:
-                    cell = ws.cell(row=current_row, column=9 + week_idx, value=existing_val)
-                    cell.fill = estimate_fill
-                    column_sources[week_idx].add("Estimated")
+            # Only preserve existing Excel estimate placements if Linear did NOT place an estimate
+            # (i.e., Linear doesn't have cycle info for this issue)
+            if not has_linear_placement:
+                for week_idx in range(num_weeks):
+                    existing_val = existing_capacity.get((issue_url, week_idx))
+                    # Only preserve non-zero values (skip 0 or near-zero values)
+                    if existing_val is not None and existing_val > 0:
+                        # Manual/estimated data gets yellow fill
+                        cell = ws.cell(row=current_row, column=9 + week_idx, value=existing_val)
+                        cell.fill = YELLOW_FILL
+                        column_sources[week_idx].add("Estimated")
 
             current_row += 1
 
@@ -552,9 +553,9 @@ def populate_sheet_refresh(
 
     for week_idx in range(num_weeks):
         sources = column_sources.get(week_idx, set())
-        if "Linear" in sources and "Estimated" in sources:
-            source_label = "Linear, Estimation"
-        elif "Linear" in sources:
+        # If Linear data exists in this column, show "Linear" (Linear takes precedence)
+        # Only show "Estimation" if there's no Linear data in this column
+        if "Linear" in sources:
             source_label = "Linear"
         elif "Estimated" in sources:
             source_label = "Estimation"
@@ -676,7 +677,10 @@ def read_existing_capacity_data(wb, start_date: datetime) -> tuple:
             cell_val = ws.cell(row=row, column=col).value
             if cell_val is not None and cell_val != "":
                 try:
-                    capacity_data[(url, week_idx)] = float(cell_val)
+                    val = float(cell_val)
+                    # Only store non-zero values
+                    if val > 0:
+                        capacity_data[(url, week_idx)] = val
                 except (ValueError, TypeError):
                     pass
 
