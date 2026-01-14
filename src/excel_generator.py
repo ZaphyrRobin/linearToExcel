@@ -12,6 +12,7 @@ YELLOW_FILL = PatternFill(start_color="FFF2CC", end_color="FFF2CC", fill_type="s
 GREEN_FILL = PatternFill(start_color="B7E1CD", end_color="B7E1CD", fill_type="solid")
 GRAY_FILL = PatternFill(start_color="D9D9D9", end_color="D9D9D9", fill_type="solid")
 RED_FILL = PatternFill(start_color="F4CCCC", end_color="F4CCCC", fill_type="solid")
+LIGHT_BLUE_FILL = PatternFill(start_color="CFE2F3", end_color="CFE2F3", fill_type="solid")
 
 # Status types that should NOT show estimation points when no cycle is assigned
 INACTIVE_STATUS_TYPES = {"backlog", "triage", "canceled", "cancelled"}
@@ -50,13 +51,24 @@ def format_name(name: str, first_only: bool = True) -> str:
 
 
 def extract_unique_assignees(issues: list) -> list:
-    """Extract unique assignee names from issues, formatted as proper names."""
+    """Extract unique assignee names from issues, formatted as proper names.
+
+    Names are deduplicated case-insensitively and normalized to title case.
+    """
     raw_names = {
         issue["assignee"]["name"]
         for issue in issues
         if issue.get("assignee") and issue["assignee"].get("name")
     }
-    return sorted(format_name(name) for name in raw_names)
+    # Format names and dedupe case-insensitively (use lowercase as key, title case as value)
+    seen = {}
+    for name in raw_names:
+        formatted = format_name(name)
+        if formatted:
+            # Normalize to title case and use lowercase for deduplication
+            normalized = formatted.title()
+            seen[normalized.lower()] = normalized
+    return sorted(seen.values())
 
 
 def get_week_index(cycle_start: str, start_date: datetime, num_weeks: int) -> int:
@@ -109,8 +121,14 @@ def populate_sheet(
     # Get unique assignees from issues
     assignees = extract_unique_assignees(issues)
 
-    # Row 1: Capacity header and week dates
-    capacity_header_row = 1
+    # Track which columns have Linear data vs manual estimates
+    # Key: week_idx, Value: set of sources ("Linear" or "Estimated")
+    column_sources = {i: set() for i in range(num_weeks)}
+
+    # Row 1: Data Source row
+    # Row 2: Capacity header and week dates
+    source_indicator_row = 1
+    capacity_header_row = 2
     ws.cell(row=capacity_header_row, column=7, value="Assignee")
     ws.cell(row=capacity_header_row, column=7).font = header_font
     ws.cell(row=capacity_header_row, column=7).fill = YELLOW_FILL
@@ -128,8 +146,8 @@ def populate_sheet(
     cell.font = header_font
     cell.fill = YELLOW_FILL
 
-    # Rows 2+: Engineer capacity rows (SUMIF formulas)
-    capacity_start_row = 2
+    # Rows 3+: Engineer capacity rows (SUMIF formulas)
+    capacity_start_row = 3
 
     # Calculate header row position (immediately after capacity section with 1 blank row)
     header_row = capacity_start_row + len(assignees) + 1
@@ -220,15 +238,18 @@ def populate_sheet(
 
             assignee = issue.get("assignee") or {}
             assignee_name = format_name(assignee.get("name", ""))
+            # Normalize to title case to match capacity section
+            if assignee_name:
+                assignee_name = assignee_name.title()
 
             # Get issue status type
             issue_state = issue.get("state") or {}
             status_type = issue_state.get("type", "").lower()
 
-            # Handle missing assignee - show "No assignee" with red background
+            # Handle missing assignee - show "No assignee" with yellow background
             if not assignee_name:
                 ws.cell(row=current_row, column=7, value="No assignee")
-                ws.cell(row=current_row, column=7).fill = RED_FILL
+                ws.cell(row=current_row, column=7).fill = YELLOW_FILL
             else:
                 ws.cell(row=current_row, column=7, value=assignee_name)
 
@@ -254,6 +275,7 @@ def populate_sheet(
                             week_idx = num_weeks - 1
                         cell = ws.cell(row=current_row, column=8 + week_idx, value=float(estimate))
                         cell.fill = GREEN_FILL
+                        column_sources[week_idx].add("Linear")
                 elif status_type not in INACTIVE_STATUS_TYPES:
                     # Issue has no cycle but is in active status: use updatedAt date
                     # Show estimate with "(No cycle!)" suffix and yellow fill
@@ -271,6 +293,7 @@ def populate_sheet(
                     # Show estimate with "(No cycle!)" indicator
                     cell = ws.cell(row=current_row, column=8 + week_idx, value=f"{int(estimate)} (No cycle!)")
                     cell.fill = YELLOW_FILL
+                    column_sources[week_idx].add("Estimated")
                 # else: Issue is in backlog/canceled status with no cycle - don't show estimate anywhere
 
             current_row += 1
@@ -284,6 +307,36 @@ def populate_sheet(
             col_letter = get_column_letter(col)
             formula = f'=SUMIF($G${data_start_row}:$G${actual_last_row},$G{row},{col_letter}${data_start_row}:{col_letter}${actual_last_row})'
             ws.cell(row=row, column=col, value=formula)
+
+    # Add Data Source row (row 1)
+    # Find the last Linear column index
+    last_linear_idx = -1
+    for week_idx in range(num_weeks):
+        if "Linear" in column_sources.get(week_idx, set()):
+            last_linear_idx = week_idx
+
+    ws.cell(row=source_indicator_row, column=7, value="Data Source")
+    ws.cell(row=source_indicator_row, column=7).font = header_font
+
+    # Apply fills and labels: Linear columns get green, Estimation columns get gray
+    linear_label_added = False
+    estimation_label_added = False
+    for week_idx in range(num_weeks):
+        cell = ws.cell(row=source_indicator_row, column=8 + week_idx)
+        if week_idx <= last_linear_idx and last_linear_idx >= 0:
+            # Linear section: green background, label only on first column
+            cell.fill = GREEN_FILL
+            if not linear_label_added:
+                cell.value = "Linear"
+                cell.font = header_font
+                linear_label_added = True
+        else:
+            # Estimation section: gray background for all remaining columns, label only on first
+            cell.fill = GRAY_FILL
+            if not estimation_label_added:
+                cell.value = "Estimation"
+                cell.font = header_font
+                estimation_label_added = True
 
     # Column widths (A=Initiative, B=Projects, C=Issue, D=Estimate, E=Description, F=Linear Ticket, G=Assigned to)
     widths = {"A": 30, "B": 35, "C": 50, "D": 15, "E": 50, "F": 40, "G": 15}
@@ -384,10 +437,16 @@ def populate_sheet_refresh(
     # Get unique assignees from issues and existing Excel data
     assignees = extract_unique_assignees(issues)
 
-    # Add existing assignees from Excel that aren't already in the list
+    # Add existing assignees from Excel that aren't already in the list (case-insensitive)
+    existing_lower = {a.lower() for a in assignees}
     for existing_assignee in existing_assignees.values():
-        if existing_assignee and existing_assignee not in assignees:
-            assignees.append(existing_assignee)
+        if existing_assignee and existing_assignee.lower() not in existing_lower:
+            normalized = existing_assignee.title()
+            assignees.append(normalized)
+            existing_lower.add(normalized.lower())
+
+    # Re-sort after adding existing assignees and filter out "No Assignee"
+    assignees = sorted([a for a in assignees if a.lower() != "no assignee"])
 
     week_dates = generate_week_dates(start_date, num_weeks)
 
@@ -537,10 +596,14 @@ def populate_sheet_refresh(
                 # No assignee in Linear: preserve existing Excel assignee
                 assignee_name = existing_assignees.get(issue_url, "")
 
-            # Handle missing assignee - show "No assignee" with red background
+            # Normalize to title case to match capacity section
+            if assignee_name:
+                assignee_name = assignee_name.title()
+
+            # Handle missing assignee - show "No assignee" with yellow background
             if not assignee_name:
                 ws.cell(row=current_row, column=8, value="No assignee")
-                ws.cell(row=current_row, column=8).fill = RED_FILL
+                ws.cell(row=current_row, column=8).fill = YELLOW_FILL
             else:
                 ws.cell(row=current_row, column=8, value=assignee_name)
 
@@ -604,23 +667,35 @@ def populate_sheet_refresh(
             formula = f'=SUMIF($H${data_start_row}:$H${actual_last_row},$H{row},{col_letter}${data_start_row}:{col_letter}${actual_last_row})'
             ws.cell(row=row, column=col, value=formula)
 
-    # Add a row showing "Linear" or "Estimation" for each weekly column (just above the main header)
+    # Add Data Source row (row 1)
+    # Find the last Linear column index
+    last_linear_idx = -1
+    for week_idx in range(num_weeks):
+        if "Linear" in column_sources.get(week_idx, set()):
+            last_linear_idx = week_idx
+
     ws.cell(row=source_indicator_row, column=8, value="Data Source")
     ws.cell(row=source_indicator_row, column=8).font = header_font
 
+    # Apply fills and labels: Linear columns get green, Estimation columns get gray
+    linear_label_added = False
+    estimation_label_added = False
     for week_idx in range(num_weeks):
-        sources = column_sources.get(week_idx, set())
-        # If Linear data exists in this column, show "Linear" (Linear takes precedence)
-        # Only show "Estimation" if there's no Linear data in this column
-        if "Linear" in sources:
-            source_label = "Linear"
-        elif "Estimated" in sources:
-            source_label = "Estimation"
+        cell = ws.cell(row=source_indicator_row, column=9 + week_idx)
+        if week_idx <= last_linear_idx and last_linear_idx >= 0:
+            # Linear section: green background, label only on first column
+            cell.fill = GREEN_FILL
+            if not linear_label_added:
+                cell.value = "Linear"
+                cell.font = header_font
+                linear_label_added = True
         else:
-            source_label = ""
-
-        cell = ws.cell(row=source_indicator_row, column=9 + week_idx, value=source_label)
-        cell.font = header_font
+            # Estimation section: gray background for all remaining columns, label only on first
+            cell.fill = GRAY_FILL
+            if not estimation_label_added:
+                cell.value = "Estimation"
+                cell.font = header_font
+                estimation_label_added = True
 
     # Column widths (A=Linear vs Estimated, G=Linear Ticket fixed width, H=Assigned to)
     widths = {"A": 18, "B": 30, "C": 35, "D": 50, "E": 15, "F": 50, "G": 40, "H": 15}
@@ -724,10 +799,10 @@ def read_existing_capacity_data(wb, start_date: datetime) -> tuple:
         if not url:
             continue
 
-        # Read assignee
+        # Read assignee (normalize to title case)
         assignee_val = ws.cell(row=row, column=assignee_col).value
         if assignee_val:
-            assignee_data[url] = str(assignee_val)
+            assignee_data[url] = str(assignee_val).title()
 
         # Read capacity values for each week
         for week_idx, col in week_col_map.items():
