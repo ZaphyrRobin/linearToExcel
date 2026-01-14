@@ -100,6 +100,7 @@ def fetch_issues_for_team(team_id: str, initiative_slugs: Optional[list] = None)
                 description
                 url
                 estimate
+                updatedAt
                 assignee { name }
                 state {
                     name

@@ -11,6 +11,12 @@ from openpyxl.utils import get_column_letter
 YELLOW_FILL = PatternFill(start_color="FFF2CC", end_color="FFF2CC", fill_type="solid")
 GREEN_FILL = PatternFill(start_color="B7E1CD", end_color="B7E1CD", fill_type="solid")
 GRAY_FILL = PatternFill(start_color="D9D9D9", end_color="D9D9D9", fill_type="solid")
+RED_FILL = PatternFill(start_color="F4CCCC", end_color="F4CCCC", fill_type="solid")
+
+# Status types that should NOT show estimation points when no cycle is assigned
+INACTIVE_STATUS_TYPES = {"backlog", "triage", "canceled", "cancelled"}
+# Status types that SHOULD show estimation points when no cycle is assigned
+ACTIVE_STATUS_TYPES = {"started", "completed", "unstarted"}
 
 
 def generate_week_dates(start_date: datetime, num_weeks: int) -> list:
@@ -92,7 +98,6 @@ def populate_sheet(
     """
 
     # Styles
-    title_font = Font(bold=True, size=14)
     header_font = Font(bold=True)
     thin_border = Border(
         left=Side(style="thin"),
@@ -101,59 +106,57 @@ def populate_sheet(
         bottom=Side(style="thin"),
     )
 
-    # Row 2: Title
-    ws.merge_cells("B2:C2")
-    ws["B2"] = f"{team_name} - {quarter} Planning"
-    ws["B2"].font = title_font
-
     # Get unique assignees from issues
     assignees = extract_unique_assignees(issues)
 
-    # Row 4: Capacity header and week dates
-    ws["G4"].fill = YELLOW_FILL
-    ws["H4"] = "Capacity"
-    ws["H4"].font = header_font
-    ws["H4"].fill = YELLOW_FILL
+    # Row 1: Capacity header and week dates
+    capacity_header_row = 1
+    ws.cell(row=capacity_header_row, column=7, value="Assignee")
+    ws.cell(row=capacity_header_row, column=7).font = header_font
+    ws.cell(row=capacity_header_row, column=7).fill = YELLOW_FILL
 
     week_dates = generate_week_dates(start_date, num_weeks)
     for i, date in enumerate(week_dates):
-        cell = ws.cell(row=4, column=9 + i, value=date)
+        cell = ws.cell(row=capacity_header_row, column=8 + i, value=date)
         cell.number_format = "m/d"
         cell.font = header_font
         cell.fill = YELLOW_FILL
 
     # Add "Capacity/week" column after week dates
-    capacity_week_col = 9 + num_weeks
-    cell = ws.cell(row=4, column=capacity_week_col, value="Capacity/week")
+    capacity_week_col = 8 + num_weeks
+    cell = ws.cell(row=capacity_header_row, column=capacity_week_col, value="Capacity/week")
     cell.font = header_font
     cell.fill = YELLOW_FILL
 
-    # Calculate header row position (after capacity section with spacing)
-    header_row = 5 + len(assignees) + 4
+    # Rows 2+: Engineer capacity rows (SUMIF formulas)
+    capacity_start_row = 2
 
-    # Rows 5+: Engineer capacity rows (SUMIF formulas)
+    # Calculate header row position (immediately after capacity section with 1 blank row)
+    header_row = capacity_start_row + len(assignees) + 1
+
+    # Data rows start right after header
     data_start_row = header_row + 1
     estimated_last_row = data_start_row + len(issues)
 
     for idx, assignee_name in enumerate(assignees):
-        row = 5 + idx
-        ws.cell(row=row, column=8, value=assignee_name)
+        row = capacity_start_row + idx
+        ws.cell(row=row, column=7, value=assignee_name)
 
         for i in range(num_weeks):
-            col = 9 + i
+            col = 8 + i
             col_letter = get_column_letter(col)
-            formula = f'=SUMIF($H${data_start_row}:$H${estimated_last_row},$H{row},{col_letter}${data_start_row}:{col_letter}${estimated_last_row})'
+            formula = f'=SUMIF($G${data_start_row}:$G${estimated_last_row},$G{row},{col_letter}${data_start_row}:{col_letter}${estimated_last_row})'
             ws.cell(row=row, column=col, value=formula)
 
-    # Header row (Dependency column removed)
+    # Header row
     headers = [
-        ("B", "Initiative"),
-        ("C", "Projects"),
-        ("D", "Issue"),
-        ("E", "Estimate (days)"),
-        ("F", "Description"),
-        ("G", "Linear Ticket"),
-        ("H", "Assigned to"),
+        ("A", "Initiative"),
+        ("B", "Projects"),
+        ("C", "Issue"),
+        ("D", "Estimate (days)"),
+        ("E", "Description"),
+        ("F", "Linear Ticket"),
+        ("G", "Assigned to"),
     ]
 
     for col_letter, header_text in headers:
@@ -165,7 +168,7 @@ def populate_sheet(
 
     # Week date headers in header row (use actual dates, not formulas)
     for i, date in enumerate(week_dates):
-        col = 9 + i
+        col = 8 + i
         cell = ws.cell(row=header_row, column=col)
         cell.value = date
         cell.number_format = "m/d"
@@ -187,78 +190,108 @@ def populate_sheet(
     # Write issues with gray separator rows between initiatives
     current_row = data_start_row
     last_initiative = None
-    last_col = 8 + num_weeks  # Last column for gray fill
+    last_col = 7 + num_weeks  # Last column for gray fill
 
     for initiative_name, project_name in sorted(grouped_issues.keys()):
         # Add gray separator row when initiative changes (except for first)
         if last_initiative is not None and initiative_name != last_initiative:
-            for col in range(2, last_col + 1):
+            for col in range(1, last_col + 1):
                 ws.cell(row=current_row, column=col).fill = GRAY_FILL
             current_row += 1
 
         last_initiative = initiative_name
 
         for issue in grouped_issues[(initiative_name, project_name)]:
-            ws.cell(row=current_row, column=2, value=initiative_name)
-            ws.cell(row=current_row, column=3, value=project_name)
-            ws.cell(row=current_row, column=4, value=issue.get("title", ""))
+            ws.cell(row=current_row, column=1, value=initiative_name)
+            ws.cell(row=current_row, column=2, value=project_name)
+            ws.cell(row=current_row, column=3, value=issue.get("title", ""))
 
             issue_cycle = issue.get("cycle") or {}
             estimate = issue.get("estimate")
             if estimate is not None:
-                cell = ws.cell(row=current_row, column=5, value=float(estimate))
+                cell = ws.cell(row=current_row, column=4, value=float(estimate))
                 cell.fill = GREEN_FILL
 
             description = issue.get("description") or ""
-            ws.cell(row=current_row, column=6, value=description[:500] if len(description) > 500 else description)
-            cell = ws.cell(row=current_row, column=7, value=issue.get("url", ""))
+            ws.cell(row=current_row, column=5, value=description[:500] if len(description) > 500 else description)
+
+            cell = ws.cell(row=current_row, column=6, value=issue.get("url", ""))
             cell.alignment = Alignment(wrap_text=True)
 
             assignee = issue.get("assignee") or {}
             assignee_name = format_name(assignee.get("name", ""))
-            ws.cell(row=current_row, column=8, value=assignee_name)
+
+            # Get issue status type
+            issue_state = issue.get("state") or {}
+            status_type = issue_state.get("type", "").lower()
+
+            # Handle missing assignee - show "No assignee" with red background
+            if not assignee_name:
+                ws.cell(row=current_row, column=7, value="No assignee")
+                ws.cell(row=current_row, column=7).fill = RED_FILL
+            else:
+                ws.cell(row=current_row, column=7, value=assignee_name)
 
             # Fill weekly capacity based on issue's cycle
             # If cycle_id is set (by-cycles mode), only show issues up to and including this cycle
             # Otherwise show all issues
             issue_cycle_start = issue_cycle.get("startsAt", "")
-            if estimate is not None and assignee_name and issue_cycle_start:
-                # Check if this issue's cycle should be shown on this tab
-                # (either no cycle filter, or issue's cycle is <= current tab's cycle)
-                should_show = True
-                if cycle_start:
-                    # Only show if issue's cycle starts on or before this tab's cycle
-                    should_show = issue_cycle_start <= cycle_start
+            if estimate is not None:
+                if issue_cycle_start:
+                    # Issue has cycle: place at the cycle's week with green fill
+                    # Check if this issue's cycle should be shown on this tab
+                    should_show = True
+                    if cycle_start:
+                        # Only show if issue's cycle starts on or before this tab's cycle
+                        should_show = issue_cycle_start <= cycle_start
 
-                if should_show:
-                    week_idx = get_week_index(issue_cycle_start, start_date, num_weeks)
-                    # Handle out-of-range: clamp to valid range
-                    if week_idx < 0:
-                        week_idx = 0
-                    elif week_idx >= num_weeks:
+                    if should_show:
+                        week_idx = get_week_index(issue_cycle_start, start_date, num_weeks)
+                        # Handle out-of-range: clamp to valid range
+                        if week_idx < 0:
+                            week_idx = 0
+                        elif week_idx >= num_weeks:
+                            week_idx = num_weeks - 1
+                        cell = ws.cell(row=current_row, column=8 + week_idx, value=float(estimate))
+                        cell.fill = GREEN_FILL
+                elif status_type not in INACTIVE_STATUS_TYPES:
+                    # Issue has no cycle but is in active status: use updatedAt date
+                    # Show estimate with "(No cycle!)" suffix and yellow fill
+                    updated_at = issue.get("updatedAt", "")
+                    if updated_at:
+                        week_idx = get_week_index(updated_at, start_date, num_weeks)
+                        # Clamp to valid range
+                        if week_idx < 0:
+                            week_idx = 0
+                        elif week_idx >= num_weeks:
+                            week_idx = num_weeks - 1
+                    else:
+                        # Fallback to last week if no updatedAt
                         week_idx = num_weeks - 1
-                    cell = ws.cell(row=current_row, column=9 + week_idx, value=float(estimate))
-                    cell.fill = GREEN_FILL
+                    # Show estimate with "(No cycle!)" indicator
+                    cell = ws.cell(row=current_row, column=8 + week_idx, value=f"{int(estimate)} (No cycle!)")
+                    cell.fill = YELLOW_FILL
+                # else: Issue is in backlog/canceled status with no cycle - don't show estimate anywhere
 
             current_row += 1
 
     # Update SUMIF formulas with actual row range
     actual_last_row = current_row - 1
     for idx in range(len(assignees)):
-        row = 5 + idx
+        row = capacity_start_row + idx
         for i in range(num_weeks):
-            col = 9 + i
+            col = 8 + i
             col_letter = get_column_letter(col)
-            formula = f'=SUMIF($H${data_start_row}:$H${actual_last_row},$H{row},{col_letter}${data_start_row}:{col_letter}${actual_last_row})'
+            formula = f'=SUMIF($G${data_start_row}:$G${actual_last_row},$G{row},{col_letter}${data_start_row}:{col_letter}${actual_last_row})'
             ws.cell(row=row, column=col, value=formula)
 
-    # Column widths (G=Linear Ticket fixed width, H=Assigned to)
-    widths = {"B": 30, "C": 35, "D": 50, "E": 15, "F": 50, "G": 40, "H": 15}
+    # Column widths (A=Initiative, B=Projects, C=Issue, D=Estimate, E=Description, F=Linear Ticket, G=Assigned to)
+    widths = {"A": 30, "B": 35, "C": 50, "D": 15, "E": 50, "F": 40, "G": 15}
     for col_letter, width in widths.items():
         ws.column_dimensions[col_letter].width = width
 
     for i in range(num_weeks + 1):
-        ws.column_dimensions[get_column_letter(9 + i)].width = 8
+        ws.column_dimensions[get_column_letter(8 + i)].width = 8
 
 
 def create_excel(
@@ -375,7 +408,7 @@ def populate_sheet_refresh(
     capacity_start_row = 3
 
     # Write Capacity header row
-    ws.cell(row=capacity_header_row, column=8, value="Capacity")
+    ws.cell(row=capacity_header_row, column=8, value="Assignee")
     ws.cell(row=capacity_header_row, column=8).font = header_font
     ws.cell(row=capacity_header_row, column=8).fill = YELLOW_FILL
 
@@ -493,6 +526,10 @@ def populate_sheet_refresh(
             cell = ws.cell(row=current_row, column=7, value=issue_url)
             cell.alignment = Alignment(wrap_text=True)
 
+            # Get issue status type
+            issue_state = issue.get("state") or {}
+            status_type = issue_state.get("type", "").lower()
+
             if linear_has_assignee:
                 # Linear has assignee: use Linear data
                 assignee_name = format_name(linear_assignee.get("name", ""))
@@ -500,7 +537,12 @@ def populate_sheet_refresh(
                 # No assignee in Linear: preserve existing Excel assignee
                 assignee_name = existing_assignees.get(issue_url, "")
 
-            ws.cell(row=current_row, column=8, value=assignee_name)
+            # Handle missing assignee - show "No assignee" with red background
+            if not assignee_name:
+                ws.cell(row=current_row, column=8, value="No assignee")
+                ws.cell(row=current_row, column=8).fill = RED_FILL
+            else:
+                ws.cell(row=current_row, column=8, value=assignee_name)
 
             # Fill weekly capacity
             issue_cycle_start = issue_cycle.get("startsAt", "")
@@ -509,8 +551,8 @@ def populate_sheet_refresh(
             linear_week_idx = None
             has_linear_placement = False
 
-            if linear_has_assignee and linear_has_cycle and estimate is not None:
-                # Linear has both assignee and cycle: calculate the week position
+            if linear_has_cycle and estimate is not None:
+                # Linear has cycle: calculate the week position
                 linear_week_idx = get_week_index(issue_cycle_start, start_date, num_weeks)
                 if linear_week_idx < 0:
                     linear_week_idx = 0
@@ -522,6 +564,21 @@ def populate_sheet_refresh(
                 cell.fill = GREEN_FILL
                 column_sources[linear_week_idx].add("Linear")
                 has_linear_placement = True
+            elif estimate is not None and status_type not in INACTIVE_STATUS_TYPES:
+                # No cycle but active status: use updatedAt date with "(No cycle!)" indicator
+                updated_at = issue.get("updatedAt", "")
+                if updated_at:
+                    week_idx = get_week_index(updated_at, start_date, num_weeks)
+                    if week_idx < 0:
+                        week_idx = 0
+                    elif week_idx >= num_weeks:
+                        week_idx = num_weeks - 1
+                else:
+                    week_idx = num_weeks - 1
+                cell = ws.cell(row=current_row, column=9 + week_idx, value=f"{int(estimate)} (No cycle!)")
+                cell.fill = YELLOW_FILL
+                column_sources[week_idx].add("Estimated")
+                has_linear_placement = True  # Don't try to restore from existing file
 
             # Only preserve existing Excel estimate placements if Linear did NOT place an estimate
             # (i.e., Linear doesn't have cycle info for this issue)
