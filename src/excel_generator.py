@@ -1,5 +1,6 @@
 """Excel spreadsheet generation for planning documents."""
 
+import re
 from datetime import datetime, timedelta
 
 import click
@@ -23,6 +24,57 @@ ACTIVE_STATUS_TYPES = {"started", "completed", "unstarted"}
 def generate_week_dates(start_date: datetime, num_weeks: int) -> list:
     """Generate a list of week start dates."""
     return [start_date + timedelta(weeks=i) for i in range(num_weeks)]
+
+
+def extract_user_story(description: str) -> str:
+    """Extract only the User Story or Description section from a Linear issue description.
+
+    Looks for sections starting with "## User Story", "## Description", "# User Story",
+    "# Description", or similar patterns and extracts the content until the next section.
+
+    If no such section is found, returns the first 500 characters of the description.
+    """
+    if not description:
+        return ""
+
+    # Patterns to match User Story or Description section headers
+    # Match ## User Story, # User Story, **User Story**, User Story:, etc.
+    section_patterns = [
+        r'#{1,2}\s*User\s*Story\s*\n',
+        r'#{1,2}\s*Description\s*\n',
+        r'\*\*User\s*Story\*\*\s*\n',
+        r'\*\*Description\*\*\s*\n',
+        r'User\s*Story:\s*\n',
+        r'Description:\s*\n',
+    ]
+
+    # Try to find a User Story or Description section
+    for pattern in section_patterns:
+        match = re.search(pattern, description, re.IGNORECASE)
+        if match:
+            # Found the section header, extract content after it
+            start_pos = match.end()
+
+            # Find the next section header (starts with # or **)
+            next_section = re.search(r'\n#{1,2}\s+\w|\n\*\*\w', description[start_pos:])
+            if next_section:
+                end_pos = start_pos + next_section.start()
+                content = description[start_pos:end_pos].strip()
+            else:
+                content = description[start_pos:].strip()
+
+            # Remove leading ">" (blockquote marker) from each line
+            content = re.sub(r'^>\s*', '', content, flags=re.MULTILINE)
+            content = content.strip()
+
+            # Return the extracted content (limit to 500 chars)
+            return content[:500] if len(content) > 500 else content
+
+    # No User Story/Description section found, return first 500 chars
+    result = description[:500] if len(description) > 500 else description
+    # Remove leading ">" from result as well
+    result = re.sub(r'^>\s*', '', result, flags=re.MULTILINE)
+    return result.strip()
 
 
 def format_name(name: str, first_only: bool = True) -> str:
@@ -230,8 +282,9 @@ def populate_sheet(
                 cell = ws.cell(row=current_row, column=4, value=float(estimate))
                 cell.fill = GREEN_FILL
 
-            description = issue.get("description") or ""
-            ws.cell(row=current_row, column=5, value=description[:500] if len(description) > 500 else description)
+            description = extract_user_story(issue.get("description") or "")
+            cell = ws.cell(row=current_row, column=5, value=description)
+            cell.alignment = Alignment(wrap_text=True)
 
             cell = ws.cell(row=current_row, column=6, value=issue.get("url", ""))
             cell.alignment = Alignment(wrap_text=True)
@@ -578,8 +631,9 @@ def populate_sheet_refresh(
                 cell = ws.cell(row=current_row, column=5, value=float(estimate))
                 cell.fill = GREEN_FILL
 
-            description = issue.get("description") or ""
-            ws.cell(row=current_row, column=6, value=description[:500] if len(description) > 500 else description)
+            description = extract_user_story(issue.get("description") or "")
+            cell = ws.cell(row=current_row, column=6, value=description)
+            cell.alignment = Alignment(wrap_text=True)
 
             issue_url = issue.get("url", "")
             cell = ws.cell(row=current_row, column=7, value=issue_url)
