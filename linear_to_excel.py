@@ -188,7 +188,8 @@ def display_issue_history(identifier: str) -> None:
 @click.option("--list-initiatives", is_flag=True, help="List available initiatives")
 @click.option("--file", "-f", "existing_file", default=None, help="Existing xlsx file to refresh with latest Linear data")
 @click.option("--issue-history", "issue_id", default=None, help="Show history of a specific issue (e.g., 'APP1-123')")
-def main(team, output, start_date, end_date, initiatives, list_teams, list_initiatives, existing_file, issue_id):
+@click.option("--exclude-completed", is_flag=True, help="Exclude issues that are already completed")
+def main(team, output, start_date, end_date, initiatives, list_teams, list_initiatives, existing_file, issue_id, exclude_completed):
     """Generate a quarterly planning Excel spreadsheet from Linear."""
     if issue_id:
         display_issue_history(issue_id)
@@ -243,7 +244,9 @@ def main(team, output, start_date, end_date, initiatives, list_teams, list_initi
         start -= timedelta(days=start.weekday())  # Adjust to Monday
 
     click.echo("Fetching issues from Linear...")
-    issues = fetch_issues_for_team(team_id, initiative_slugs)
+    if exclude_completed:
+        click.echo("Excluding completed issues...")
+    issues = fetch_issues_for_team(team_id, initiative_slugs, exclude_completed=exclude_completed)
     click.echo(f"Found {len(issues)} issues")
 
     if not issues:

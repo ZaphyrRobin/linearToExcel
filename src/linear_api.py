@@ -76,8 +76,14 @@ def fetch_all_initiatives(include_archived: bool = False) -> list:
     return initiatives
 
 
-def fetch_issues_for_team(team_id: str, initiative_slugs: Optional[list] = None) -> list:
-    """Fetch all issues for a specific team with pagination, optionally filtered by initiatives."""
+def fetch_issues_for_team(team_id: str, initiative_slugs: Optional[list] = None, exclude_completed: bool = False) -> list:
+    """Fetch all issues for a specific team with pagination, optionally filtered by initiatives.
+
+    Args:
+        team_id: The Linear team ID
+        initiative_slugs: Optional list of initiative slugs to filter by
+        exclude_completed: If True, exclude issues with completed status
+    """
     all_issues = []
     end_cursor = None
 
@@ -138,6 +144,13 @@ def fetch_issues_for_team(team_id: str, initiative_slugs: Optional[list] = None)
             issue for issue in issues
             if (issue.get("state") or {}).get("type", "").lower() not in excluded_types
         ]
+
+        # Filter out completed issues if requested
+        if exclude_completed:
+            issues = [
+                issue for issue in issues
+                if (issue.get("state") or {}).get("type", "").lower() != "completed"
+            ]
 
         # Filter by initiative if specified
         if initiative_ids:
