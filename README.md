@@ -48,6 +48,9 @@ python linear_to_excel.py -t APP1 -i "37e115a3f23c,75024d4f765d" -s 2025-10-06 -
 
 # 3. Refresh existing file with latest Linear data (preserves manual edits)
 python linear_to_excel.py -t APP1 -i "37e115a3f23c,75024d4f765d" -s 2025-10-06 -e 2026-01-30 -f ~/Downloads/APP1_Q4_2025_planning.xlsx
+
+# 4. Exclude the already completed ones
+python linear_to_excel.py -t APP1 -i "37e115a3f23c,0b0dfdc9f925,4c04711ad89d" -s 2026-02-02 -e 2026-03-31 -o ~/Downloads/APP1_Q1_2026_planning.xlsx --exclude-completed
 ```
 
 ## Options
@@ -63,6 +66,7 @@ python linear_to_excel.py -t APP1 -i "37e115a3f23c,75024d4f765d" -s 2025-10-06 -
 | `--issue-history` | Show history of a specific issue (e.g., 'APP1-123') |
 | `--list-teams` | List available teams |
 | `--list-initiatives` | List available initiatives |
+| `--exclude-completed`| Exclude the completed issues |
 
 ## Output Format
 
