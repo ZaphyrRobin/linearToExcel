@@ -153,12 +153,15 @@ def populate_sheet(
     start_date: datetime,
     num_weeks: int = 13,
     cycle_start: str = None,
+    initiative_order: list = None,
 ):
     """Populate a worksheet with planning data.
 
     If cycle_start is provided, only issues from cycles up to and including
     that date will have estimates placed in the weekly columns.
     All issues are still shown.
+
+    If initiative_order is provided, initiatives are sorted in that order.
     """
 
     # Styles
@@ -262,7 +265,15 @@ def populate_sheet(
     last_initiative = None
     last_col = 7 + num_weeks  # Last column for gray fill
 
-    for initiative_name, project_name in sorted(grouped_issues.keys()):
+    # Sort by initiative order if provided, otherwise alphabetically
+    def sort_key(key):
+        initiative_name, project_name = key
+        if initiative_order and initiative_name in initiative_order:
+            return (initiative_order.index(initiative_name), project_name)
+        # Put non-matching initiatives at the end, sorted alphabetically
+        return (len(initiative_order) if initiative_order else 0, initiative_name, project_name)
+
+    for initiative_name, project_name in sorted(grouped_issues.keys(), key=sort_key):
         # Add gray separator row when initiative changes (except for first)
         if last_initiative is not None and initiative_name != last_initiative:
             for col in range(1, last_col + 1):
@@ -407,13 +418,14 @@ def create_excel(
     output_file: str,
     start_date: datetime,
     num_weeks: int = 13,
+    initiative_order: list = None,
 ):
     """Create a new Excel planning spreadsheet."""
     wb = Workbook()
     ws = wb.active
     ws.title = start_date.strftime("%m-%d")
 
-    populate_sheet(ws, team_name, quarter, issues, start_date, num_weeks)
+    populate_sheet(ws, team_name, quarter, issues, start_date, num_weeks, initiative_order=initiative_order)
 
     wb.save(output_file)
     click.echo(f"Excel file saved to: {output_file}")
@@ -426,6 +438,7 @@ def refresh_excel(
     input_file: str,
     start_date: datetime,
     num_weeks: int = 13,
+    initiative_order: list = None,
 ):
     """Refresh an existing Excel file with latest Linear data.
 
@@ -451,7 +464,8 @@ def refresh_excel(
 
     populate_sheet_refresh(
         ws, team_name, quarter, issues, start_date, num_weeks,
-        existing_capacity=existing_capacity, existing_assignees=existing_assignees
+        existing_capacity=existing_capacity, existing_assignees=existing_assignees,
+        initiative_order=initiative_order
     )
 
     wb.save(input_file)
@@ -467,11 +481,14 @@ def populate_sheet_refresh(
     num_weeks: int = 13,
     existing_capacity: dict = None,
     existing_assignees: dict = None,
+    initiative_order: list = None,
 ):
     """Populate a worksheet with refreshed Linear data.
 
     For issues WITH assignee in Linear: use Linear data for assignee and estimate placement
     For issues WITHOUT assignee in Linear: preserve existing assignee and estimate placement from Excel
+
+    If initiative_order is provided, initiatives are sorted in that order.
     """
     if existing_capacity is None:
         existing_capacity = {}
@@ -601,7 +618,15 @@ def populate_sheet_refresh(
     last_initiative = None
     last_col = 8 + num_weeks  # Last column for gray fill
 
-    for initiative_name, project_name in sorted(grouped_issues.keys()):
+    # Sort by initiative order if provided, otherwise alphabetically
+    def sort_key(key):
+        initiative_name, project_name = key
+        if initiative_order and initiative_name in initiative_order:
+            return (initiative_order.index(initiative_name), project_name)
+        # Put non-matching initiatives at the end, sorted alphabetically
+        return (len(initiative_order) if initiative_order else 0, initiative_name, project_name)
+
+    for initiative_name, project_name in sorted(grouped_issues.keys(), key=sort_key):
         # Add gray separator row when initiative changes (except for first)
         if last_initiative is not None and initiative_name != last_initiative:
             for col in range(1, last_col + 1):  # Start from column A

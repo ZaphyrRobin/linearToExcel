@@ -229,8 +229,13 @@ def main(team, output, start_date, end_date, initiatives, list_teams, list_initi
     click.echo(f"Fetching data for team: {team_name} ({team})")
 
     initiative_slugs = [s.strip() for s in initiatives.split(",")] if initiatives else None
+    initiative_order = None  # Ordered list of initiative names based on -i flag order
     if initiative_slugs:
         click.echo(f"Filtering by initiatives: {initiative_slugs}")
+        # Build ordered list of initiative names from slugs
+        all_initiatives = fetch_all_initiatives()
+        slug_to_name = {init["slugId"]: init["name"] for init in all_initiatives if init.get("slugId")}
+        initiative_order = [slug_to_name.get(slug) for slug in initiative_slugs if slug_to_name.get(slug)]
 
     # Determine quarter label and start date
     now = datetime.now()
@@ -268,13 +273,13 @@ def main(team, output, start_date, end_date, initiatives, list_teams, list_initi
     if existing_file:
         # Refresh existing file with latest Linear data
         click.echo(f"Refreshing existing file: {existing_file}")
-        refresh_excel(team_name, quarter, issues, existing_file, start, num_weeks)
+        refresh_excel(team_name, quarter, issues, existing_file, start, num_weeks, initiative_order=initiative_order)
     else:
         # Create new file
         if not output:
             output = f"{team_name} - {quarter} Planning.xlsx"
         click.echo("Generating Excel file...")
-        create_excel(team_name, quarter, issues, output, start, num_weeks)
+        create_excel(team_name, quarter, issues, output, start, num_weeks, initiative_order=initiative_order)
 
     click.echo("Done!")
 
